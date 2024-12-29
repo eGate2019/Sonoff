@@ -1,4 +1,4 @@
-# homeassistant/components/ewelink/entity.py
+"""Entity module."""
 
 import logging
 from typing import Dict, Optional, Set
@@ -11,7 +11,7 @@ from .ewelink import XDevice, XRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
-ENTITY_CATEGORIES: Dict[str, EntityCategory] = {
+ENTITY_CATEGORIES: dict[str, EntityCategory] = {
     "battery": EntityCategory.DIAGNOSTIC,
     "battery_voltage": EntityCategory.DIAGNOSTIC,
     "led": EntityCategory.CONFIG,
@@ -21,13 +21,13 @@ ENTITY_CATEGORIES: Dict[str, EntityCategory] = {
     "sensitivity": EntityCategory.CONFIG,
 }
 
-ICONS: Dict[str, str] = {
+ICONS: dict[str, str] = {
     "dusty": "mdi:cloud",
     "led": "mdi:led-off",
     "noise": "mdi:bell-ring",
 }
 
-NAMES: Dict[str, str] = {
+NAMES: dict[str, str] = {
     "led": "LED",
     "rssi": "RSSI",
     "pulse": "INCHING",

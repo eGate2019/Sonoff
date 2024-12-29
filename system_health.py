@@ -23,10 +23,12 @@ from .core.const import DOMAIN, PRIVATE_KEYS
 def async_register(
     hass: HomeAssistant, register: system_health.SystemHealthRegistration
 ) -> None:
+    """Register the system health information callback."""
     register.async_register_info(system_health_info)
 
 
 async def system_health_info(hass: HomeAssistant):
+    """Collect system health information for display in the UI."""
     cloud_online = local_online = cloud_total = local_total = 0
 
     for registry in hass.data[DOMAIN].values():
@@ -59,6 +61,7 @@ async def system_health_info(hass: HomeAssistant):
 
 
 async def setup_debug(hass: HomeAssistant, logger: Logger):
+    """Set up the debug view for system health and logs."""
     view = DebugView(logger)
     hass.http.register_view(view)
 
@@ -67,18 +70,19 @@ async def setup_debug(hass: HomeAssistant, logger: Logger):
     integration = hass.data["integrations"][DOMAIN]
     info = await async_get_system_info(hass)
     info[DOMAIN + "_version"] = f"{integration.version} ({source_hash})"
-    logger.debug(f"SysInfo: {info}")
+    logger.debug(f"SysInfo: {info}")  # noqa: G004
 
     integration.manifest["issue_tracker"] = view.url
 
 
 class DebugView(logging.Handler, HomeAssistantView):
-    """Class generate web page with component debug logs."""
+    """Generate a web page with component debug logs."""
 
     name = DOMAIN
     requires_auth = False
 
-    def __init__(self, logger: Logger):
+    def __init__(self, logger: Logger)->None:
+        """Initialize the debug view and set up logging handler."""
         super().__init__()
 
         # https://waymoot.org/home/python_string/
@@ -86,13 +90,14 @@ class DebugView(logging.Handler, HomeAssistantView):
 
         self.propagate_level = logger.getEffectiveLevel()
 
-        # random url because without authorization!!!
+        # Random URL because it's without authorization
         DebugView.url = f"/api/{DOMAIN}/{uuid.uuid4()}"
 
         logger.addHandler(self)
         logger.setLevel(logging.DEBUG)
 
     def handle(self, rec: logging.LogRecord):
+        """Handle a log record and add it to the debug view."""
         if isinstance(rec.args, dict):
             rec.msg = rec.msg % {
                 k: v for k, v in rec.args.items() if k not in PRIVATE_KEYS
@@ -104,11 +109,12 @@ class DebugView(logging.Handler, HomeAssistantView):
             msg += "|" + "".join(exc[-2:]).replace("\n", "|")
         self.text.append(msg)
 
-        # prevent debug to Hass log if user don't want it
+        # Prevent debug from being logged in Hass log if user doesn't want it
         if self.propagate_level > rec.levelno:
             rec.levelno = -1
 
     async def get(self, request: web.Request):
+        """Handle an HTTP GET request for debug logs."""
         try:
             lines = self.text
 

@@ -1,3 +1,5 @@
+"""Diagnostic module."""
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -9,6 +11,7 @@ from .core.ewelink import XRegistry
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry):
+    """Retrieve diagnostic information for a config entry."""
     try:
         if XRegistry.config:
             config = XRegistry.config.copy()
@@ -65,6 +68,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
 async def async_get_device_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry, device: DeviceEntry
 ):
+    """Retrieve diagnostic information for a specific device."""
     did = next(i[1] for i in device.identifiers if i[0] == DOMAIN)
     info = await async_get_config_entry_diagnostics(hass, entry)
     info["device"] = info.pop("devices").get(did, {})

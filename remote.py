@@ -1,3 +1,5 @@
+"""Remote module."""
+
 import asyncio
 import logging
 from typing import Union
@@ -8,6 +10,7 @@ from homeassistant.components.remote import (
     RemoteEntity,
 )
 from homeassistant.const import ATTR_COMMAND
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 
 from .binary_sensor import XRemoteSensor, XRemoteSensorOff
@@ -21,7 +24,8 @@ _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 0  # fix entity_platform parallel_updates Semaphore
 
 
-async def async_setup_entry(hass, config_entry, add_entities):
+async def async_setup_entry(hass: HomeAssistant, config_entry, add_entities):
+    """Set up remote entities for the given config entry."""
     ewelink: XRegistry = hass.data[DOMAIN][config_entry.entry_id]
     ewelink.dispatcher_connect(
         SIGNAL_ADD_ENTITIES,
@@ -30,28 +34,25 @@ async def async_setup_entry(hass, config_entry, add_entities):
 
 
 def rfbridge_childs(remotes: list, config: dict = None):
+    """Generate child entities for the RFBridge based on remotes and config."""
     childs = {}
-    # For dual RF sensors: {payload_on channel: payload_off name}
     duals = {}
 
     for remote in remotes:
         for button in remote["buttonName"]:
             channel = next(iter(button))
 
-            # remote_type 6 (alarm) has one button without name
             if remote["remote_type"] != "6":
                 child = {"name": button[channel], "device_class": "button"}
             else:
                 child = {"name": remote["name"]}
 
-            # everride child params from YAML
             if config and child["name"] in config:
                 child.update(config[child["name"]])
 
                 if "payload_off" in child:
                     duals[channel] = child["payload_off"]
 
-                # child with timeout or payload_off can't be a button
                 if child.get("device_class") == "button" and (
                     "payload_off" in child or "timeout" in child
                 ):
@@ -64,9 +65,8 @@ def rfbridge_childs(remotes: list, config: dict = None):
         try:
             ch_off = next(k for k, v in childs.items() if v["name"] == name)
         except StopIteration:
-            _LOGGER.warning("Can't find payload_off: " + name)
+            _LOGGER.warning(f"Can't find payload_off: {name}") # noqa: G004
             continue
-        # move off channel to end of the dict
         childs[ch_off] = childs.pop(ch_off)
         childs[ch_off]["channel_on"] = ch
 
@@ -75,12 +75,14 @@ def rfbridge_childs(remotes: list, config: dict = None):
 
 # noinspection PyAbstractClass
 class XRemote(XEntity, RemoteEntity):
+    """Represent a remote entity with child buttons and sensors."""
+
     _attr_is_on = True
     childs: dict[str, Union[XRemoteButton, XRemoteSensor, XRemoteSensorOff]] = None
 
-    def __init__(self, ewelink: XRegistry, device: dict):
+    def __init__(self, ewelink: XRegistry, device: dict)->None:
+        """Initialize the remote entity with child sensors and buttons."""
         try:
-            # only learned channels
             channels = [str(c["rfChl"]) for c in device["params"]["rfList"]]
 
             config = ewelink.config and ewelink.config.get("rfbridge")
@@ -101,17 +103,15 @@ class XRemote(XEntity, RemoteEntity):
             self.childs = childs
 
         except Exception as e:
-            _LOGGER.error(f"{self.unique_id} | can't setup RFBridge", exc_info=e)
+            _LOGGER.error(f"{self.unique_id} | can't setup RFBridge", exc_info=e)  # noqa: G004
 
-        # init bridge after childs for update available
         XEntity.__init__(self, ewelink, device)
 
         self.params = {"cmd", "arming"}
         self.ts = None
 
     def set_state(self, params: dict):
-        # skip full cloud state update
-        # https://github.com/AlexxIT/SonoffLAN/issues/1101
+        """Set the state of the remote entity based on the provided parameters."""
         if not self.is_on or "init" in params or not self.hass:
             return
 
@@ -119,13 +119,10 @@ class XRemote(XEntity, RemoteEntity):
             if not param.startswith("rfTrig"):
                 continue
 
-            # skip first msg from LAN because it sent old trigger event with
-            # local discovery and only LAN sends arming param
             if self.ts is None and params.get("arming"):
                 self.ts = ts
                 return
 
-            # skip same cmd from local and cloud
             if ts == self.ts:
                 return
 
@@ -145,9 +142,9 @@ class XRemote(XEntity, RemoteEntity):
             self.hass.bus.async_fire("sonoff.remote", data)
 
     def internal_available(self) -> bool:
+        """Check if the remote entity and its children are available."""
         available = XEntity.internal_available(self)
         if self.childs and self.available != available:
-            # update available for all entity childs
             for child in self.childs.values():
                 if not isinstance(child, Entity):
                     continue
@@ -157,16 +154,15 @@ class XRemote(XEntity, RemoteEntity):
         return available
 
     async def async_send_command(self, command, **kwargs):
+        """Send a command to the remote entity with an optional delay."""
         delay = kwargs.get(ATTR_DELAY_SECS, DEFAULT_DELAY_SECS)
         for i, channel in enumerate(command):
             if i:
                 await asyncio.sleep(delay)
 
-            # transform button name to channel number
             if not channel.isdigit():
                 channel = next(k for k, v in self.childs.items() if v.name == channel)
 
-            # cmd param for local and for cloud mode
             await self.ewelink.send(
                 self.device,
                 {"cmd": "transmit", "rfChl": int(channel)},
@@ -174,16 +170,18 @@ class XRemote(XEntity, RemoteEntity):
             )
 
     async def async_learn_command(self, **kwargs):
+        """Learn a new command from the remote."""
         command = kwargs[ATTR_COMMAND]
-        # cmd param for local and for cloud mode
         await self.ewelink.send(
             self.device, {"cmd": "capture", "rfChl": int(command[0])}, cmd_lan="capture"
         )
 
     async def async_turn_on(self, **kwargs) -> None:
+        """Turn the remote entity on."""
         self._attr_is_on = True
         self._async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
+        """Turn the remote entity off."""
         self._attr_is_on = False
         self._async_write_ha_state()

@@ -1,4 +1,6 @@
+""""Cover module."""
 from homeassistant.components.cover import CoverDeviceClass, CoverEntity
+from homeassistant.core import HomeAssistant
 
 from .core.const import DOMAIN
 from .core.entity import XEntity
@@ -7,7 +9,7 @@ from .core.ewelink import SIGNAL_ADD_ENTITIES, XRegistry
 PARALLEL_UPDATES = 0  # Fix entity_platform parallel_updates Semaphore
 
 
-async def async_setup_entry(hass, config_entry, add_entities):
+async def async_setup_entry(hass:HomeAssistant, config_entry, add_entities):
     """Set up the eWeLink cover entities from a config entry."""
     ewelink: XRegistry = hass.data[DOMAIN][config_entry.entry_id]
     ewelink.dispatcher_connect(
@@ -25,7 +27,7 @@ class XCover(XEntity, CoverEntity):
 
     params = {"switch", "setclose"}
 
-    def __init__(self, ewelink: XRegistry, device: dict):
+    def __init__(self, ewelink: XRegistry, device: dict)->None:
         """Initialize the cover entity."""
         super().__init__(ewelink, device)
         self._attr_device_class = DEVICE_CLASSES.get(device.get("device_class"))

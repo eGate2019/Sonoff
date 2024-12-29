@@ -2,7 +2,7 @@
 
 import hashlib
 import os
-from typing import List, Union
+from typing import List, Union  # noqa: UP035
 
 from homeassistant.core import HomeAssistant
 

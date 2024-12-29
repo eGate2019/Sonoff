@@ -1,8 +1,4 @@
-"""This registry can read data from LAN devices and send commands to them.
-For non DIY devices data will be encrypted with devicekey. The registry cannot
-decode such messages by itself because it does not manage the list of known
-devices and their devicekey.
-"""
+"""Local DYI management."""
 
 import asyncio
 import base64
@@ -12,17 +8,16 @@ import json
 import logging
 
 import aiohttp
+from aiohttp.hdrs import CONTENT_TYPE
 from Crypto.Cipher import AES
 from Crypto.Hash import MD5
 from Crypto.Random import get_random_bytes
-from aiohttp.hdrs import CONTENT_TYPE
-from zeroconf import Zeroconf, ServiceStateChange
+from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
 
 from .base import SIGNAL_CONNECTED, SIGNAL_UPDATE, XDevice, XRegistryBase
 
 _LOGGER = logging.getLogger(__name__)
-
 
 # some venv users don't have Crypto.Util.Padding
 # I don't know why pycryptodome is not installed on their systems
@@ -30,17 +25,20 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def pad(data_to_pad: bytes, block_size: int):
+    """Pad data to make its length a multiple of block_size."""
     padding_len = block_size - len(data_to_pad) % block_size
     padding = bytes([padding_len]) * padding_len
     return data_to_pad + padding
 
 
 def unpad(padded_data: bytes, block_size: int):
+    """Remove padding from data."""
     padding_len = padded_data[-1]
     return padded_data[:-padding_len]
 
 
 def encrypt(payload: dict, devicekey: str):
+    """Encrypt payload data with the device's key."""
     devicekey = devicekey.encode("utf-8")
 
     hash_ = MD5.new()
@@ -62,6 +60,7 @@ def encrypt(payload: dict, devicekey: str):
 
 
 def decrypt(payload: dict, devicekey: str):
+    """Decrypt payload data using the device's key."""
     devicekey = devicekey.encode("utf-8")
 
     hash_ = MD5.new()
@@ -75,10 +74,13 @@ def decrypt(payload: dict, devicekey: str):
 
 
 class XRegistryLocal(XRegistryBase):
+    """Registry class to manage local devices using Zeroconf."""
+
     browser: AsyncServiceBrowser = None
     online: bool = False
 
     def start(self, zeroconf: Zeroconf):
+        """Start the registry and begin browsing for devices."""
         self.browser = AsyncServiceBrowser(
             zeroconf, "_ewelink._tcp.local.", [self._handler1]
         )
@@ -86,6 +88,7 @@ class XRegistryLocal(XRegistryBase):
         self.dispatcher_send(SIGNAL_CONNECTED)
 
     async def stop(self):
+        """Stop the registry and cancel browsing for devices."""
         if not self.online:
             return
         self.online = False
@@ -98,26 +101,22 @@ class XRegistryLocal(XRegistryBase):
         name: str,
         state_change: ServiceStateChange,
     ):
-        """Step 1. Receive change event from zeroconf."""
-        # accept: eWeLink_1000xxxxxx.local.
-        # skip: ihost-1001xxxxxx.local.
+        """Handle Zeroconf service state change event."""
         if state_change == ServiceStateChange.Removed or not name.startswith("eWeLink"):
             return
 
-        asyncio.create_task(self._handler2(zeroconf, service_type, name))
+        asyncio.create_task(self._handler2(zeroconf, service_type, name))  # noqa: RUF006
 
     async def _handler2(self, zeroconf: Zeroconf, service_type: str, name: str):
-        """Step 2. Request additional info about add and update event from device."""
+        """Request additional information about device on state change."""
         deviceid = name[8:18]
         try:
             info = AsyncServiceInfo(service_type, name)
             if not await info.async_request(zeroconf, 3000) or not info.properties:
-                _LOGGER.debug(f"{deviceid} <= Local0 | Can't get zeroconf info")
+                _LOGGER.debug(f"{deviceid} <= Local0 | Can't get zeroconf info") # noqa: G004
                 return
 
-            # support update with empty host and host without port
             for addr in info.addresses:
-                # zeroconf lib should return IPv4, but better check anyway
                 addr = ipaddress.IPv4Address(addr)
                 host = f"{addr}:{info.port}" if info.port else str(addr)
                 break
@@ -135,11 +134,10 @@ class XRegistryLocal(XRegistryBase):
             self._handler3(deviceid, host, data)
 
         except Exception as e:
-            _LOGGER.debug(f"{deviceid} <= Local0 | Zeroconf error", exc_info=e)
+            _LOGGER.debug(f"{deviceid} <= Local0 | Zeroconf error", exc_info=e) # noqa: G004
 
     def _handler3(self, deviceid: str, host: str, data: dict):
-        """Step 3. Process new data from device."""
-
+        """Process new data from device and update the registry."""
         raw = "".join([data[f"data{i}"] for i in range(1, 5, 1) if f"data{i}" in data])
 
         msg = {
@@ -169,9 +167,7 @@ class XRegistryLocal(XRegistryBase):
         timeout: int = 5,
         cre_retry_counter: int = 10,
     ):
-        # known commands for DIY: switch, startup, pulse, sledonline
-        # other commands: switch, switches, transmit, dimmable, light, fan
-
+        """Send a command to a device with specified parameters."""
         if command is None:
             if params is None:
                 return "noquery"
@@ -194,7 +190,6 @@ class XRegistryLocal(XRegistryBase):
             if ":" not in host:
                 host += ":8081"  # default port, some devices may have another
 
-            # noinspection HttpUrlsUsage
             r = await self.session.post(
                 f"http://{host}/zeroconf/{command}",
                 json=payload,
@@ -203,14 +198,12 @@ class XRegistryLocal(XRegistryBase):
             )
 
             try:
-                # some devices don't support getState command
-                # https://github.com/AlexxIT/SonoffLAN/issues/1442
                 if command == "getState" and r.headers.get(CONTENT_TYPE) == "text/html":
                     return "online"
 
                 resp: dict = await r.json()
                 if resp["error"] == 0:
-                    _LOGGER.debug(f"{log} <= {resp}")
+                    _LOGGER.debug(f"{log} <= {resp}") # noqa: G004
 
                     if "iv" in resp:
                         msg = {
@@ -227,19 +220,19 @@ class XRegistryLocal(XRegistryBase):
                     return "online"
 
                 else:
-                    _LOGGER.debug(f"{log} <= {resp}")
+                    _LOGGER.debug(f"{log} <= {resp}") # noqa: G004
                     return "error"
 
             except Exception as e:
-                _LOGGER.debug(f"{log} !! Can't read JSON {e}")
+                _LOGGER.debug(f"{log} !! Can't read JSON {e}") # noqa: G004
                 return "error"
 
         except asyncio.TimeoutError:
-            _LOGGER.debug(f"{log} !! Timeout {timeout}")
+            _LOGGER.debug(f"{log} !! Timeout {timeout}") # noqa: G004
             return "timeout"
 
         except aiohttp.ClientConnectorError as e:
-            _LOGGER.debug(f"{log} !! Can't connect: {e}")
+            _LOGGER.debug(f"{log} !! Can't connect: {e}")# noqa: G004
             return "E#CON"
 
         except aiohttp.ClientOSError as e:
@@ -247,17 +240,7 @@ class XRegistryLocal(XRegistryBase):
                 _LOGGER.debug(log, exc_info=e)
                 return "E#COE"  # ClientOSError
 
-            # This happens because the device's web server is not multi-threaded
-            # and can only process one request at a time. Therefore, if the
-            # device is busy processing another request, it will close the
-            # connection for the new request and we will get this error.
-            #
-            # It appears that the device takes some time to process a new request
-            # after the previous one was closed, which caused a locking approach
-            # to not work across different devices. Simply retrying on this error
-            # a few times seems to fortunately work reliably, so we'll do that.
-
-            _LOGGER.debug(f"{log} !! ConnectionResetError")
+            _LOGGER.debug(f"{log} !! ConnectionResetError")  # noqa: G004
             if cre_retry_counter > 0:
                 await asyncio.sleep(0.1)
                 return await self.send(
@@ -279,10 +262,9 @@ class XRegistryLocal(XRegistryBase):
 
     @staticmethod
     def decrypt_msg(msg: dict, devicekey: str = None) -> dict:
+        """Decrypt a message using the device's key."""
         data = decrypt(msg, devicekey)
-        # Fix Sonoff RF Bridge sintax bug
         if data and data.startswith(b'{"rf'):
             data = data.replace(b'"="', b'":"')
-        # fix https://github.com/AlexxIT/SonoffLAN/issues/1160
         data = data.rstrip(b"\x02")
         return json.loads(data)

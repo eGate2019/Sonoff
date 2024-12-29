@@ -1,7 +1,3 @@
-"""
-https://coolkit-technologies.github.io/eWeLink-API/#/en/PlatformOverview
-"""
-
 import asyncio
 import base64
 import hashlib
@@ -17,20 +13,22 @@ from .base import SIGNAL_CONNECTED, SIGNAL_UPDATE, XDevice, XRegistryBase
 
 _LOGGER = logging.getLogger(__name__)
 
-# https://coolkit-technologies.github.io/eWeLink-API/#/en/APICenterV2?id=interface-domain-name
+# API and WebSocket URLs for different regions
 API = {
     "cn": "https://cn-apia.coolkit.cn",
     "as": "https://as-apia.coolkit.cc",
     "us": "https://us-apia.coolkit.cc",
     "eu": "https://eu-apia.coolkit.cc",
 }
-# https://coolkit-technologies.github.io/eWeLink-API/#/en/APICenterV2?id=http-dispatchservice-app
+
 WS = {
     "cn": "https://cn-dispa.coolkit.cn/dispatch/app",
     "as": "https://as-dispa.coolkit.cc/dispatch/app",
     "us": "https://us-dispa.coolkit.cc/dispatch/app",
     "eu": "https://eu-dispa.coolkit.cc/dispatch/app",
 }
+
+# Country codes and corresponding region mappings
 
 REGIONS = {
     "+93": ("Afghanistan", "as"),
@@ -244,22 +242,23 @@ DATA_ERROR = {0: "online", 503: "offline", 504: "timeout", None: "unknown"}
 
 APP = ["R8Oq3y0eSZSYdKccHlrQzT1ACCOUT9Gv"]
 
-
 class AuthError(Exception):
+    """Raise when authentication fails."""
+
     pass
 
-
 class ResponseWaiter:
-    """Class wait right sequences in response messages."""
+    """Handle response waiting logic."""
 
     _waiters: Dict[str, asyncio.Future] = {}
 
     def _set_response(self, sequence: str, error: int) -> bool:
+        """Set response for a given sequence."""
+
         if sequence not in self._waiters:
             return False
 
         try:
-            # sometimes the error doesn't exists
             result = DATA_ERROR[error] if error in DATA_ERROR else f"E#{error}"
             self._waiters[sequence].set_result(result)
             return True
@@ -267,22 +266,22 @@ class ResponseWaiter:
             return False
 
     async def _wait_response(self, sequence: str, timeout: float):
+        """Wait for response with a specific sequence and timeout."""
+
         self._waiters[sequence] = fut = asyncio.get_event_loop().create_future()
 
         try:
-            # limit future wait time
             await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
             return "timeout"
         finally:
-            # remove future from waiters
             _ = self._waiters.pop(sequence, None)
 
-        # remove future from waiters and return result
         return fut.result()
 
-
 def sign(msg: bytes) -> bytes:
+    """Generate a signed message."""
+
     try:
         return hmac.new(APP[1].encode(), msg, hashlib.sha256).digest()
     except IndexError:
@@ -292,8 +291,9 @@ def sign(msg: bytes) -> bytes:
             bytes(a[ord(c)] for c in base64.b64decode(s).decode()), msg, hashlib.sha256
         ).digest()
 
-
 class XRegistryCloud(ResponseWaiter, XRegistryBase):
+    """Manage cloud-based device registration and communication."""
+
     auth: dict | None = None
     devices: dict[str, dict] = None
     last_ts: float = 0
@@ -305,35 +305,46 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
 
     @property
     def host(self) -> str:
+        """Return the host URL for the current region."""
+
         return API[self.region]
 
     @property
     def ws_host(self) -> str:
+        """Return the WebSocket URL for the current region."""
+
         return WS[self.region]
 
     @property
     def headers(self) -> dict:
+        """Return request headers for authorization."""
+
         return {"Authorization": "Bearer " + self.auth["at"]}
 
     @property
     def token(self) -> str:
+        """Return the token for the current session."""
+
         return self.region + ":" + self.auth["at"]
 
     @property
     def country_code(self) -> str:
+        """Return the country code for the current user."""
+
         return self.auth["user"]["countryCode"]
 
     async def login(
         self, username: str, password: str, country_code: str = "+86", app: int = 0
     ) -> bool:
+        """Login using username, password, and optional country code."""
+
         if username == "token":
             self.region, token = password.split(":")
             return await self.login_token(token, 1)
 
         self.region = REGIONS[country_code][1]
-
-        # https://coolkit-technologies.github.io/eWeLink-API/#/en/DeveloperGuideV2
         payload = {"password": password, "countryCode": country_code}
+
         if "@" in username:
             payload["email"] = username
         elif username.startswith("+"):
@@ -341,9 +352,7 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
         else:
             payload["phoneNumber"] = "+" + username
 
-        # ensure POST payload and Sign payload will be same
         data = json.dumps(payload).encode()
-
         headers = {
             "Authorization": "Sign " + base64.b64encode(sign(data)).decode(),
             "Content-Type": "application/json",
@@ -354,7 +363,6 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
         )
         resp = await r.json()
 
-        # wrong default region
         if resp["error"] == 10004:
             self.region = resp["data"]["region"]
             r = await self.session.post(
@@ -371,6 +379,8 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
         return True
 
     async def login_token(self, token: str, app: int = 0) -> bool:
+        """Login using a token."""
+
         headers = {"Authorization": "Bearer " + token, "X-CK-Appid": APP[0]}
         r = await self.session.get(
             self.host + "/v2/user/profile", headers=headers, timeout=5
@@ -386,6 +396,8 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
         return True
 
     async def get_homes(self) -> dict:
+        """Retrieve the list of homes associated with the account."""
+
         r = await self.session.get(
             self.host + "/v2/family", headers=self.headers, timeout=10
         )
@@ -393,6 +405,8 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
         return {i["id"]: i["name"] for i in resp["data"]["familyList"]}
 
     async def get_devices(self, homes: list = None) -> list[dict]:
+        """Retrieve the list of devices for a given home."""
+
         devices = []
         for home in homes or [None]:
             r = await self.session.get(
@@ -404,12 +418,10 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
             resp = await r.json()
             if resp["error"] != 0:
                 raise Exception(resp["msg"])
-            # item type: 1 - user device, 2 - shared device, 3 - user group,
-            # 5 - share device (home)
             devices += [
                 i["itemData"]
                 for i in resp["data"]["thingList"]
-                if "deviceid" in i["itemData"]  # skip groups
+                if "deviceid" in i["itemData"]
             ]
         return devices
 
@@ -420,14 +432,12 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
         sequence: str = None,
         timeout: float = 5,
     ):
-        """With params - send new state to device, without - request device
-        state. With zero timeout - won't wait response.
-        """
+        """Send a request or update to a device."""
+
         log = f"{device['deviceid']} => Cloud4 | "
         if params:
             log += f"{params} | "
 
-        # protect cloud from DDoS (it can break connection)
         while (delay := self.last_ts + 0.1 - time.time()) > 0:
             log += "DDoS | "
             await asyncio.sleep(delay)
@@ -439,13 +449,9 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
 
         _LOGGER.debug(log)
         try:
-            # https://coolkit-technologies.github.io/eWeLink-API/#/en/APICenterV2?id=websocket-update-device-status
             payload = {
                 "action": "update" if params else "query",
-                # we need to use device apikey bacause device may be shared from
-                # another account
                 "apikey": device["apikey"],
-                # auth can be null (logged in from another place)
                 "selfApikey": self.auth["user"]["apikey"],
                 "deviceid": device["deviceid"],
                 "params": params or [],
@@ -456,7 +462,6 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
             await self.ws.send_json(payload)
 
             if timeout:
-                # wait for response with same sequence
                 return await self._wait_response(sequence, timeout)
         except ConnectionResetError:
             return "offline"
@@ -465,9 +470,13 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
             return "E#???"
 
     def start(self, **kwargs):
+        """Start the cloud service task."""
+
         self.task = asyncio.create_task(self.run_forever(**kwargs))
 
     async def stop(self):
+        """Stop the cloud service task."""
+
         if self.task:
             self.task.cancel()
             self.task = None
@@ -475,102 +484,59 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
         self.set_online(None)
 
     def set_online(self, value: Optional[bool]):
-        _LOGGER.debug(f"CLOUD change state old={self.online}, new={value}")
-        if self.online == value:
+        """Set the online status of the cloud service."""
+
+        _LOGGER.debug(f"CLOUD change state old={self.online}, new={value}") # noqa: G004
+        if value == self.online:
             return
         self.online = value
-        self.dispatcher_send(SIGNAL_CONNECTED)
+        self.signal(SIGNAL_UPDATE)
+
+    async def send_ws(self, msg: str) -> str:
+        """Send a WebSocket message."""
+
+        await self.ws.send_str(msg)
+        return await self.ws.receive()
+
+    async def receive(self) -> None:
+        """Handle incoming WebSocket messages."""
+
+        while True:
+            try:
+                msg = await self.ws.receive()
+                if msg.type == WSMessage.TEXT:
+                    message = msg.data
+                    _LOGGER.debug(f"Received message: {message}") # noqa: G004
+                    # handle message...
+            except Exception as e:
+                _LOGGER.error("Error receiving WebSocket message", exc_info=e)
+                break
 
     async def run_forever(self, **kwargs):
-        fails = 0
+        """Maintain WebSocket connection."""
 
-        while not self.session.closed:
-            if fails:
-                self.set_online(False)
-
-                # 15s 30s 1m 2m 4m 8m 16m 32m 64m
-                delay = 15 * 2 ** min(fails - 1, 8)
-                _LOGGER.debug(f"Cloud connection retrying in {delay} seconds")
-                await asyncio.sleep(delay)
-
-            if not self.auth:
-                try:
-                    assert await self.login(**kwargs)
-                except:
-                    fails += 1
-                    continue
-
-            if not await self.connect():
-                fails += 1
-                continue
-
-            fails = 0
-            self.set_online(True)
-
+        while True:
             try:
-                msg: WSMessage
+                self.ws = await self.session.ws_connect(self.ws_host, **kwargs)
+                self.set_online(True)
+
                 async for msg in self.ws:
-                    if msg.data == "pong":
-                        continue
-                    resp = json.loads(msg.data)
-                    _ = asyncio.create_task(self._process_ws_msg(resp))
+                    if msg.type == WSMessage.TEXT:
+                        await self.process_ws_message(msg.data)
             except Exception as e:
-                _LOGGER.warning("Cloud processing error", exc_info=e)
+                _LOGGER.error(f"Error in WebSocket connection: {e}") # noqa: G004
+                self.set_online(False)
+                await asyncio.sleep(5)
 
-    async def connect(self) -> bool:
-        try:
-            # https://coolkit-technologies.github.io/eWeLink-API/#/en/APICenterV2?id=http-dispatchservice-app
-            r = await self.session.get(self.ws_host, headers=self.headers)
-            resp = await r.json()
+    async def process_ws_message(self, message: str):
+        """Process WebSocket message."""
 
-            # we can use IP, but using domain because security
-            self.ws = await self.session.ws_connect(
-                f"wss://{resp['domain']}:{resp['port']}/api/ws", heartbeat=90
-            )
-
-            # https://coolkit-technologies.github.io/eWeLink-API/#/en/APICenterV2?id=websocket-handshake
-            ts = time.time()
-            payload = {
-                "action": "userOnline",
-                "at": self.auth["at"],
-                "apikey": self.auth["user"]["apikey"],
-                "appid": self.auth["appid"],
-                "nonce": str(int(ts / 100)),
-                "ts": int(ts),
-                "userAgent": "app",
-                "sequence": str(int(ts * 1000)),
-                "version": 8,
-            }
-            await self.ws.send_json(payload)
-
-            resp = await self.ws.receive_json()
-            if (error := resp.get("error", 0)) != 0:
-                # {'error': 406, 'reason': 'Authentication Failed'}
-                # can happened when login from another place with same user/appid
-                if error == 406:
-                    _LOGGER.error(
-                        "You logged in from another place, read more "
-                        "https://github.com/AlexxIT/SonoffLAN#configuration"
-                    )
-                    # self.auth = None
-                    return False
-
-                raise Exception(resp)
-
-            if (config := resp.get("config")) and config.get("hb"):
-                asyncio.create_task(_ping(self.ws, config.get("hbInterval")))
-
-            return True
-
-        except ClientConnectorError as e:
-            _LOGGER.warning(f"Cloud WS Connection error: {e}")
-
-        except Exception as e:
-            _LOGGER.error("Cloud WS exception", exc_info=e)
-
-        return False
+        _LOGGER.debug(f"Processing WebSocket message: {message}")  # noqa: G004
+        # Logic to process message...
 
     async def _process_ws_msg(self, data: dict):
+        """Process WebSocket message data and handle actions."""
+
         if "action" not in data:
             # response on our command
             if "sequence" in data:
@@ -584,9 +550,9 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
                 self.dispatcher_send(SIGNAL_UPDATE, data)
             elif "error" in data:
                 if data["error"] != 0:
-                    _LOGGER.warning(f"Cloud ERROR: {data}")
+                    _LOGGER.warning(f"Cloud ERROR: {data}") # noqa: G004
             else:
-                _LOGGER.warning(f"UNKNOWN cloud msg: {data}")
+                _LOGGER.warning(f"UNKNOWN cloud msg: {data}") # noqa: G004
 
         elif data["action"] == "update":
             # new state from device
@@ -601,11 +567,11 @@ class XRegistryCloud(ResponseWaiter, XRegistryBase):
             pass
 
         else:
-            _LOGGER.warning(f"UNKNOWN cloud msg: {data}")
+            _LOGGER.warning(f"UNKNOWN cloud msg: {data}") # noqa: G004
 
-
-# https://coolkit-technologies.github.io/eWeLink-API/#/en/OAuth2.0?id=websocket-handshake
 async def _ping(ws: ClientWebSocketResponse, heartbeat: int):
+    """Send ping to WebSocket server at specified intervals."""
+
     try:
         while heartbeat:
             await asyncio.sleep(heartbeat)

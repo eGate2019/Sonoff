@@ -1,9 +1,11 @@
+"""Camera module."""
+
 import asyncio
+from dataclasses import dataclass
 import logging
 import socket
-import time
-from dataclasses import dataclass
 from threading import Thread
+import time
 from typing import Union
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,67 +44,63 @@ COMMANDS = {
 
 @dataclass
 class Camera:
+    """Represent a camera device."""
+
     addr: tuple = None
     init_data: bytes = None
-
     last_time: int = 0
     sequence = 0
-
     wait_event = asyncio.Event()
     wait_data: int = None
     wait_sequence: bytes = b"\x00\x00"
 
     def init(self):
+        """Initialize camera data."""
         self.sequence = 0
         self.wait_sequence = b"\x00\x00"
 
     def get_sequence(self) -> str:
+        """Generate a new sequence number."""
         self.sequence += 1
         self.wait_sequence = self.sequence.to_bytes(2, byteorder="big")
         return self.wait_sequence.hex()
 
     async def wait(self, data: int):
+        """Wait for a specific data response."""
         self.wait_data = data
         self.wait_event.clear()
         await self.wait_event.wait()
 
 
 class XCameras(Thread):
-    """
-    It's better to use `DatagramProtocol` and `create_datagram_endpoint`.
-    But it don't supported in win32 with `ProactorEventLoop`.
-    """
+    """Handle communication with multiple cameras."""
 
     devices: dict[str, Camera] = {}
     sock: socket = None
 
-    def __init__(self):
+    def __init__(self)->None:
+        """Initialize the XCameras thread."""
         super().__init__(name="Sonoff_CAM", daemon=True)
 
     def datagram_received(self, data: bytes, addr: tuple):
-        # _LOGGER.debug(f"<= {addr[0]:15} {data[:80].hex()}")
-
+        """Handle incoming datagram from a camera."""
         cmd = data[1]
 
         if cmd == 0x41:
             deviceid = int.from_bytes(data[12:16], byteorder="big")
             deviceid = f"{deviceid:06}"
-            # EWLK-012345-XXXXX
-            # UID = f"EWLK-{deviceid}-{data[16:21]}"
 
             if deviceid not in self.devices:
-                _LOGGER.debug(f"Found new camera {deviceid}: {addr}")
+                _LOGGER.debug(f"Found new camera {deviceid}: {addr}") # noqa: G004
                 self.devices[deviceid] = Camera(addr, data)
                 return
 
             else:
-                # Update addr of device
                 self.devices[deviceid].addr = addr
                 self.devices[deviceid].init_data = data
 
         device = next((p for p in self.devices.values() if p.addr == addr), None)
         if not device:
-            # log.debug(f"Response from unknown address: {addr}")
             return
 
         if cmd != 0xE0:
@@ -113,8 +111,6 @@ class XCameras(Thread):
             self.sendto(data, device)
 
         elif cmd == 0xE0:
-            # TODO:
-            # self.sendto(CMD_PONG, device)
             pass
 
         if device.wait_data == cmd:
@@ -122,31 +118,30 @@ class XCameras(Thread):
                 device.wait_event.set()
 
     def sendto(self, data: Union[bytes, str], device: Camera):
+        """Send data to a specific camera."""
         if isinstance(data, str):
             if "%s" in data:
                 data = data % device.get_sequence()
             data = bytes.fromhex(data)
-        # _LOGGER.debug(f"=> {device.addr[0]:15} {data[:60].hex()}")
         self.sock.sendto(data, device.addr)
 
     def start(self):
+        """Start the XCameras thread and initialize the socket."""
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.sock.bind(("", 0))
-
         super().start()
 
     async def send(self, deviceid: str, command: str):
+        """Send a command to a specific camera."""
         device = self.devices.get(deviceid)
 
         if not device or time.time() - device.last_time > 9:
-            # start Thread if first time
             if not self.is_alive():
                 self.start()
 
             if not device:
-                # create new device, we want wait for it
                 self.devices[deviceid] = device = Camera()
             else:
                 device.init()
@@ -164,11 +159,12 @@ class XCameras(Thread):
             self.sendto(COMMANDS["init"], device)
             await device.wait(0xD1)
 
-        _LOGGER.debug(f"Send Command {command}")
+        _LOGGER.debug(f"Send Command {command}")  # noqa: G004
         self.sendto(COMMANDS[command], device)
         await device.wait(0xD1)
 
     def run(self):
+        """Run the XCameras thread to receive camera data."""
         while True:
             try:
                 data, addr = self.sock.recvfrom(1024)

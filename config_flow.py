@@ -25,8 +25,8 @@ class FlowHandler(ConfigFlow, domain=DOMAIN):
     def cloud(self):
         """Return an instance of XRegistryCloud for API interactions."""
         session = async_get_clientsession(self.hass)
-        debug_session = LoggingSession(session)
-        return XRegistryCloud(debug_session)
+        #debug_session = LoggingSession(session)
+        return XRegistryCloud(session)
 
     async def async_step_import(self, user_input=None):
         """Handle import step from configuration.yaml."""

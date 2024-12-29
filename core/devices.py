@@ -1,63 +1,18 @@
+"""Device module."""
+
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.light import LightEntity
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.switch import SwitchEntity
 
-from ..binary_sensor import (
-    XBinarySensor,
-    XHumanSensor,
-    XLightSensor,
-    XWaterSensor,
-    XWiFiDoor,
-    XZigbeeMotion,
-)
-from ..climate import XClimateNS, XClimateTH, XThermostat
+from ..binary_sensor import XBinarySensor
+from ..climate import XClimateTH
 from ..core.entity import XEntity
-from ..cover import XCover, XCover91, XCoverDualR3, XZigbeeCover
-from ..fan import XDiffuserFan, XFan, XFanDualR3, XToggleFan
-from ..light import (
-    XDiffuserLight,
-    XDimmer,
-    XFanLight,
-    XLight57,
-    XLightB02,
-    XLightB05B,
-    XLightB1,
-    XLightD1,
-    XLightGroup,
-    XLightL1,
-    XLightL3,
-    XOnOffLight,
-    XT5Light,
-    XZigbeeLight,
-)
-from ..number import XPulseWidth, XSensitivity
-from ..remote import XRemote
-from ..sensor import (
-    XEnergySensor,
-    XEnergySensorDualR3,
-    XEnergySensorPOWR3,
-    XEnergyTotal,
-    XHumidityTH,
-    XOutdoorTempNS,
-    XRemoteButton,
-    XSensor,
-    XT5Action,
-    XTemperatureNS,
-    XTemperatureTH,
-    XUnknown,
-    XWiFiDoorBattery,
-)
-from ..switch import (
-    XBoolSwitch,
-    XDetach,
-    XSwitch,
-    XSwitches,
-    XSwitchPOWR3,
-    XSwitchTH,
-    XToggle,
-    XZigbeeSwitches,
-)
+from ..cover import XCover, XCoverDualR3
+from ..fan import XFanDualR3, XToggleFan
+from ..light import XLightGroup, XOnOffLight
+from ..sensor import XEnergySensor, XHumidityTH, XSensor, XTemperatureTH, XUnknown
+from ..switch import XSwitch, XSwitches, XToggle
 from .ewelink import XDevice
 
 # Supported custom device classes
@@ -71,6 +26,7 @@ DEVICE_CLASS = {
 
 def unwrap_cached_properties(attrs: dict):
     """Fix metaclass CachedProperties problem in latest Hass."""
+
     for k, v in list(attrs.items()):
         if k.startswith("_attr_") and f"_{k}" in attrs and isinstance(v, property):
             attrs[k] = attrs.pop(f"_{k}")
@@ -139,7 +95,7 @@ EnergyPOW = spec(
 )
 
 # Backward compatibility for unique_id
-DoorLock = spec(XBinarySensor,param="lock",uid="",default_class="door")
+DoorLock = spec(XBinarySensor, param="lock", uid="", default_class="door")
 
 # Device specifications mapping based on UIID
 DEVICES = {
@@ -151,18 +107,18 @@ DEVICES = {
        XSwitch,
        LED,
        RSSI,
-       spec(XSensor,param="power"),
+       spec(XSensor, param="power"),
        EnergyPOW,
    ],  # Sonoff POW (first)
    6: SPEC_SWITCH,
-   7: SPEC_2CH,# Sonoff T1 2CH
-   8: SPEC_3CH,# Sonoff T1 3CH
+   7: SPEC_2CH,  # Sonoff T1 2CH
+   8: SPEC_3CH,  # Sonoff T1 3CH
    9: SPEC_4CH,
-   11: [XCover,RSSI], # King Art - King Q4 Cover (only cloud)
-   14: SPEC_SWITCH,# Sonoff Basic (3rd party)
+   11: [XCover, RSSI],  # King Art - King Q4 Cover (only cloud)
+   14: SPEC_SWITCH,  # Sonoff Basic (3rd party)
    15: [
-       XClimateTH,XTemperatureTH,XHumidityTH,RSSI,RSSI],
-   # Sonoff TH16
+       XClimateTH, XTemperatureTH, XHumidityTH, RSSI, RSSI
+   ],  # Sonoff TH16
    # Additional device specifications...
 }
 
@@ -184,109 +140,108 @@ def get_spec(device: dict) -> list:
         classes = [XUnknown]  # Default to unknown class
 
     # Handle specific cases based on UIID and parameters.
-    if uiid in [126 ,165] and device["params"].get("workMode") == 2:
-        classes=[cls for cls in classes if not cls.__bases__==XSwitches]
-        classes=[XCoverDualR3,XFanDualR3]+classes
+    if uiid in [126, 165] and device["params"].get("workMode") == 2:
+        classes = [cls for cls in classes if cls.__bases__ != XSwitches]
+        classes = [XCoverDualR3, XFanDualR3] + classes
 
     if uiid in [133] and not device["params"].get("HMI_ATCDevice"):
-        classes=[cls for cls in classes if not cls.__bases__==XClimateNS]
+        classes = [cls for cls in classes if cls.__bases__ != XClimateTH]
 
     if uiid in [2026] and not device["params"].get("battery"):
-        classes=[cls for cls in classes if cls != Battery]
+        classes = [cls for cls in classes if cls != Battery]
 
     if "device_class" in device:
-        classes=get_custom_spec(classes ,device["device_class"])
+        classes = get_custom_spec(classes, device["device_class"])
 
     return classes
 
-def get_custom_spec(classes: list ,device_class):
+def get_custom_spec(classes: list, device_class):
      """Get custom specifications based on the provided device class."""
 
      # Supported formats for device_class handling.
 
      # Single channel specification.
-     if isinstance(device_class ,str):
+     if isinstance(device_class, str):
          if device_class in DEVICE_CLASS:
-             classes=[spec(classes[0] ,base=device_class)]+classes[1:]
+             classes = [spec(classes[0], base=device_class)] + classes[1:]
 
-     elif isinstance(device_class ,list):
+     elif isinstance(device_class, list):
          # Remove default multichannel classes from specification.
-         base=classes[0].__base__
-         classes=[cls for cls in classes if base not in cls.__bases__]
+         base = classes[0].__base__
+         classes = [cls for cls in classes if base not in cls.__bases__]
 
-         for i ,sub_class in enumerate(device_class):
+         for i, sub_class in enumerate(device_class):
              # Simple multichannel specification.
-             if isinstance(sub_class ,str):
-                 classes.append(spec(base ,channel=i ,uid=str(i + 1) ,base=sub_class))
+             if isinstance(sub_class, str):
+                 classes.append(spec(base, channel=i, uid=str(i + 1), base=sub_class))
 
-             elif isinstance(sub_class ,dict):
-                 sub_class,i=next(iter(sub_class.items()))
+             elif isinstance(sub_class, dict):
+                 sub_class, i = next(iter(sub_class.items()))
 
                  # Light with brightness control.
-                 if isinstance(i ,list) and sub_class=="light":
-                     chs=[x - 1 for x in i]
-                     uid ="".join(str(x) for x in i)
-                     classes.append(spec(XLightGroup ,channels=chs ,uid=uid))
+                 if isinstance(i, list) and sub_class == "light":
+                     chs = [x - 1 for x in i]
+                     uid = "".join(str(x) for x in i)
+                     classes.append(spec(XLightGroup, channels=chs, uid=uid))
 
                  # Multichannel specification.
-                 elif isinstance(i,int):
-                     classes.append(spec(base ,channel=(i - 1),uid=str(i),base=sub_class))
+                 elif isinstance(i, int):
+                     classes.append(spec(base, channel=(i - 1), uid=str(i), base=sub_class))
 
      return classes
 
-def get_spec_wrapper(func,sensors:list):
+def get_spec_wrapper(func, sensors: list):
      """Wrap specification function to include additional sensors."""
 
      def wrapped(device: dict) -> list:
-         """Wrapped function to modify returned class list."""
+         """Wrapp function to modify returned class list."""
 
-         classes=func(device)
+         classes = func(device)
 
          for uid in sensors:
              if (uid in device["params"] or uid == "host") and all(
-                     cls.param != uid and cls.uid != uid for cls in classes):
-                 classes.append(spec(XSensor,param=uid))
+                     uid not in (cls.param, cls.uid) for cls in classes):
+                 classes.append(spec(XSensor, param=uid))
 
          return classes
 
      return wrapped
 
-def set_default_class(device_class:str):
+def set_default_class(device_class: str):
      """Set default class based on the specified device class."""
 
      # Adjust base class depending on the type of device.
-     if device_class=="light":
-         LightEntity.__bases__=(XEntity,)
+     if device_class == "light":
+         LightEntity.__bases__ = (XEntity,)
 
      else:
-         SwitchEntity.__bases__=(XEntity,)
+         SwitchEntity.__bases__ = (XEntity,)
 
 # Cloud definitions for DIY devices.
-DIY={
-     "plug":[1,None,"Single Channel DIY"],
-     "strip":[4,None,"Multi Channel DIY"],
-     "diy_plug":[1,"SONOFF","MINI DIY"],
-     "enhanced_plug":[5,"SONOFF","POW DIY"],
-     "th_plug":[15,"SONOFF","TH DIY"],
+DIY = {
+     "plug": [1, None, "Single Channel DIY"],
+     "strip": [4, None, "Multi Channel DIY"],
+     "diy_plug": [1, "SONOFF", "MINI DIY"],
+     "enhanced_plug": [5, "SONOFF", "POW DIY"],
+     "th_plug": [15, "SONOFF", "TH DIY"],
 }
 
-def setup_diy(device: dict) ->XDevice:
-    """Setup a DIY device based on its local type."""
+def setup_diy(device: dict) -> XDevice:
+    """Set up a DIY device based on its local type."""
 
-    ltype=device["localtype"]
+    ltype = device["localtype"]
 
     try:
-        uiid ,brand ,model=DIY[ltype]
+        uiid, brand, model = DIY[ltype]
 
         # Handle specific cases based on local type.
+        if ltype == "diy_plug" and "switches" in device["params"]:
+            uiid = 77
+            model = "MINI R3 DIY"
 
-        if ltype=="diy_plug" and "switches" in device["params"]:
-            uiid=77
-            model ="MINI R3 DIY"
-
-        device["name"]=model
-        device["brandName"]=brand
-        device["extra"]={"uiid":uiid}
+        device["name"] = model
+        device["brandName"] = brand
+        device["extra"] = {"uiid": uiid}
         device["productModel"] = model
     except Exception:
         device["name"] = "Unknown DIY"
