@@ -102,8 +102,8 @@ UNIQUE_DEVICES = {}
 async def remove_deactivated_entities(hass: HomeAssistant, integration_domain: str):
     """Remove deactivated entities for a given integration."""
     entity_registry = async_get_entity_registry(hass)
-
-    for entity_id, entity_entry in entity_registry.entities.items():
+    entity_list= entity_registry.entities.items()
+    for entity_id, entity_entry in entity_list:
         if entity_entry.platform == integration_domain and entity_entry.disabled:
             _LOGGER.info("Removing disabled entity: %s", entity_id)
             entity_registry.async_remove(entity_id)
